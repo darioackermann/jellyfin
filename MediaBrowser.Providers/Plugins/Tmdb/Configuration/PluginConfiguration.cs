@@ -51,7 +51,13 @@ namespace MediaBrowser.Providers.Plugins.Tmdb
         /// <summary>
         /// Gets or sets a value indicating whether to hide crew members without profile images.
         /// </summary>
+
         public bool HideMissingCrewMembers { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether to fetch and display missing movies of the collection.
+        /// </summary>
+        public bool ShowMissing { get; set; } = false;
 
         /// <summary>
         /// Gets or sets a value indicating the poster image size to fetch.
