@@ -11,6 +11,7 @@ using Jellyfin.LiveTv.Recordings;
 using Jellyfin.MediaEncoding.Hls.Extensions;
 using Jellyfin.Networking;
 using Jellyfin.Networking.HappyEyeballs;
+using Jellyfin.Plugin.Tmdb.Movies.Providers;
 using Jellyfin.Server.Extensions;
 using Jellyfin.Server.HealthChecks;
 using Jellyfin.Server.Implementations;
@@ -134,6 +135,7 @@ namespace Jellyfin.Server
             services.AddHostedService<LibraryChangedNotifier>();
             services.AddHostedService<UserDataChangeNotifier>();
             services.AddHostedService<RecordingNotifier>();
+            services.AddHostedService<TmdbMissingMovieProvider>();
         }
 
         /// <summary>
