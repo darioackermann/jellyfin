@@ -8,6 +8,7 @@ using MediaBrowser.Controller.Collections;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Querying;
 using Microsoft.Extensions.Logging;
@@ -39,22 +40,23 @@ namespace Emby.Server.Implementations.Library.Validators
             _logger = logger;
         }
 
-        /// <summary>
-        /// Runs the specified progress.
-        /// </summary>
-        /// <param name="progress">The progress.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>Task.</returns>
-        public async Task Run(IProgress<double> progress, CancellationToken cancellationToken)
-        {
-            var collectionNameMoviesMap = new Dictionary<string, HashSet<Guid>>();
+    /// <summary>
+    /// Runs the specified progress.
+    /// </summary>
+    /// <param name="progress">The progress.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>Task.</returns>
+    public async Task Run(IProgress<double> progress, CancellationToken cancellationToken)
+    {
+        var collectionNameMoviesMap = new Dictionary<string, (HashSet<Guid> MovieIds, HashSet<Guid> LibraryIds)>();
 
-            foreach (var library in _libraryManager.RootFolder.Children)
+        foreach (var library in _libraryManager.RootFolder.Children)
+        {
+            var libraryOptions = _libraryManager.GetLibraryOptions(library);
+            if (!libraryOptions.AutomaticallyAddToCollection)
             {
-                if (!_libraryManager.GetLibraryOptions(library).AutomaticallyAddToCollection)
-                {
-                    continue;
-                }
+                continue;
+            }
 
                 var startIndex = 0;
                 var pagesize = 1000;
@@ -73,20 +75,24 @@ namespace Emby.Server.Implementations.Library.Validators
                         Recursive = true
                     });
 
-                    foreach (var m in movies)
+                foreach (var m in movies)
+                {
+                    if (m is Movie movie && !string.IsNullOrEmpty(movie.CollectionName))
                     {
-                        if (m is Movie movie && !string.IsNullOrEmpty(movie.CollectionName))
+                        if (collectionNameMoviesMap.TryGetValue(movie.CollectionName, out var collectionInfo))
                         {
-                            if (collectionNameMoviesMap.TryGetValue(movie.CollectionName, out var movieList))
-                            {
-                                movieList.Add(movie.Id);
-                            }
-                            else
-                            {
-                                collectionNameMoviesMap[movie.CollectionName] = new HashSet<Guid> { movie.Id };
-                            }
+                            collectionInfo.MovieIds.Add(movie.Id);
+                            collectionInfo.LibraryIds.Add(library.Id);
+                        }
+                        else
+                        {
+                            collectionNameMoviesMap[movie.CollectionName] = (
+                                new HashSet<Guid> { movie.Id },
+                                new HashSet<Guid> { library.Id }
+                            );
                         }
                     }
+                }
 
                     if (movies.Count < pagesize)
                     {
@@ -113,27 +119,35 @@ namespace Emby.Server.Implementations.Library.Validators
                 Recursive = true
             });
 
-        foreach (var (collectionName, movieIds) in collectionNameMoviesMap)
+        foreach (var (collectionName, collectionInfo) in collectionNameMoviesMap)
         {
             try
             {
                 var boxSet = boxSets.FirstOrDefault(b => b?.Name == collectionName) as BoxSet;
                 if (boxSet is null)
                 {
-                    // won't automatically create collection if only one movie in it
-                    if (movieIds.Count >= 2)
+                    // Find the smallest MinCollectionSize among all libraries containing movies in this collection
+                    var minCollectionSize = collectionInfo.LibraryIds
+                        .Select(libraryId => _libraryManager.RootFolder.Children.FirstOrDefault(l => Guid.Equals(l.Id, libraryId)))
+                        .Where(library => library != null)
+                        .Select(library => _libraryManager.GetLibraryOptions(library!).MinCollectionSize)
+                        .DefaultIfEmpty(new LibraryOptions().MinCollectionSize)
+                        .Min();
+
+                    // Only create collection if we have enough movies
+                    if (collectionInfo.MovieIds.Count >= minCollectionSize)
                     {
                         boxSet = await _collectionManager.CreateCollectionAsync(new CollectionCreationOptions
                         {
                             Name = collectionName,
                         }).ConfigureAwait(false);
 
-                            await _collectionManager.AddToCollectionAsync(boxSet.Id, movieIds);
+                            await _collectionManager.AddToCollectionAsync(boxSet.Id, collectionInfo.MovieIds);
                         }
                     }
                     else
                     {
-                        await _collectionManager.AddToCollectionAsync(boxSet.Id, movieIds);
+                        await _collectionManager.AddToCollectionAsync(boxSet.Id, collectionInfo.MovieIds);
                     }
 
                     numComplete++;
@@ -141,13 +155,13 @@ namespace Emby.Server.Implementations.Library.Validators
                     percent /= count;
                     percent *= 100;
 
-                    progress.Report(percent);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error refreshing {CollectionName} with {@MovieIds}", collectionName, movieIds);
-                }
+                progress.Report(percent);
             }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error refreshing {CollectionName} with {@MovieIds}", collectionName, collectionInfo.MovieIds);
+            }
+        }
 
             progress.Report(100);
         }
