@@ -113,21 +113,20 @@ namespace Emby.Server.Implementations.Library.Validators
                 Recursive = true
             });
 
-            foreach (var (collectionName, movieIds) in collectionNameMoviesMap)
+        foreach (var (collectionName, movieIds) in collectionNameMoviesMap)
+        {
+            try
             {
-                try
+                var boxSet = boxSets.FirstOrDefault(b => b?.Name == collectionName) as BoxSet;
+                if (boxSet is null)
                 {
-                    var boxSet = boxSets.FirstOrDefault(b => b?.Name == collectionName) as BoxSet;
-                    if (boxSet is null)
+                    // won't automatically create collection if only one movie in it
+                    if (movieIds.Count >= 2)
                     {
-                        // won't automatically create collection if only one movie in it
-                        if (movieIds.Count >= 2)
+                        boxSet = await _collectionManager.CreateCollectionAsync(new CollectionCreationOptions
                         {
-                            boxSet = await _collectionManager.CreateCollectionAsync(new CollectionCreationOptions
-                            {
-                                Name = collectionName,
-                                IsLocked = true
-                            });
+                            Name = collectionName,
+                        }).ConfigureAwait(false);
 
                             await _collectionManager.AddToCollectionAsync(boxSet.Id, movieIds);
                         }
